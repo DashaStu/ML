@@ -26,12 +26,10 @@ def find_best_split(feature_vector, target_vector):
     :return gini_best: оптимальное значение критерия Джини (число)
     """
     # ╰( ͡° ͜ʖ ͡° )つ──☆*:・ﾟ
-
-    # Преобразуем входные данные в numpy массивы для векторизации
     feature_vector = np.array(feature_vector)
     target_vector = np.array(target_vector)
 
-    # 1. Сортируем признаки и переупорядочиваем таргет в соответствии с сортировкой
+    #Сортируем признаки и переупорядочиваем таргет в соответствии с сортировкой
     sorted_indices = np.argsort(feature_vector)
     feature_sorted = feature_vector[sorted_indices]
     target_sorted = target_vector[sorted_indices]
@@ -39,78 +37,50 @@ def find_best_split(feature_vector, target_vector):
     # Общее количество элементов
     N = len(target_sorted)
 
-    # Если признак константный или вектор пустой, возвращаем пустые значения
     if N < 2 or feature_sorted[0] == feature_sorted[-1]:
         return np.array([]), np.array([]), None, None
 
-    # 2. Вычисляем возможные пороги (среднее двух соседних)
+    # Вычисляем возможные пороги (среднее двух соседних)
     # Используем маску для исключения дубликатов признаков (когда соседи равны)
-    # feature_sorted[:-1] - все кроме последнего
-    # feature_sorted[1:] - все кроме первого (сдвиг на 1)
     distinct_mask = feature_sorted[:-1] != feature_sorted[1:]
 
     # Пороги вычисляются только там, где значения признаков меняются
     thresholds = (feature_sorted[:-1] + feature_sorted[1:]) / 2.0
     thresholds = thresholds[distinct_mask]
 
-    # Если все значения признака одинаковы (после проверки выше может не сработать для float),
+    # Если все значения признака одинаковы
     # distinct_mask будет полностью False
     if len(thresholds) == 0:
         return np.array([]), np.array([]), None, None
 
-    # 3. Векторизованный расчет количества классов 1 и 0 для всех возможных сплитов
-
-    # Кумулятивная сумма единиц (класс 1) слева от сплита
-    # cumsum возвращает массив, где i-й элемент сумма от 0 до i.
-    # Это соответствует разбиению ПОСЛЕ i-го элемента.
-    # Нам нужны все разбиения, кроме самого последнего (весь вектор слева, справа пусто),
-    # но distinct_mask уже убирает последний элемент, так как он сравнивает i и i+1.
-    # Тем не менее, считаем для всех N-1 позиций.
-
+    # Векторизованный расчет количества классов 1 и 0 для всех возможных сплитов
     cum_target = np.cumsum(target_sorted)
 
-    # Количество объектов в левом поддереве для каждого сплита (от 1 до N-1)
     sizes_left = np.arange(1, N)
-
-    # Количество 1 в левом поддереве
     n1_left = cum_target[:-1]
-    # Количество 0 в левом поддереве (Размер левого - кол-во 1)
     n0_left = sizes_left - n1_left
 
-    # Количество объектов в правом поддереве
     sizes_right = N - sizes_left
-    # Общее количество 1 во всем векторе
     n1_total = cum_target[-1]
-
-    # Количество 1 в правом поддереве (Общее - Левое)
     n1_right = n1_total - n1_left
-    # Количество 0 в правом поддереве
     n0_right = sizes_right - n1_right
 
-    # 4. Расчет критерия Джини H(R) = 1 - p1^2 - p0^2
+    #Расчет критерия Джини H(R) = 1 - p1^2 - p0^2
 
-    # Доли классов (p)
     p1_l = n1_left / sizes_left
     p0_l = n0_left / sizes_left
 
     p1_r = n1_right / sizes_right
     p0_r = n0_right / sizes_right
 
-    # Джини для левого и правого поддеревьев
     h_left = 1 - p1_l ** 2 - p0_l ** 2
     h_right = 1 - p1_r ** 2 - p0_r ** 2
 
-    # 5. Итоговый функционал Q(R)
     # Q(R) = - (|Rl|/|R|) * H(Rl) - (|Rr|/|R|) * H(Rr)
     ginis_all = - (sizes_left / N) * h_left - (sizes_right / N) * h_right
 
-    # 6. Фильтрация дубликатов (применяем маску, рассчитанную в шаге 2)
     ginis = ginis_all[distinct_mask]
 
-    # 7. Поиск лучшего сплита
-    # np.argmax возвращает ПЕРВЫЙ индекс максимального элемента.
-    # Так как thresholds отсортированы по возрастанию, при совпадении значений
-    # будет выбран сплит с минимальным порогом (требование задачи).
     best_idx = np.argmax(ginis)
 
     threshold_best = thresholds[best_idx]
@@ -130,14 +100,26 @@ class DecisionTree:
         self._min_samples_split = min_samples_split
         self._min_samples_leaf = min_samples_leaf
 
-    def _fit_node(self, sub_X, sub_y, node):
-        if np.all(sub_y != sub_y[0]):
+    def _fit_node(self, sub_X, sub_y, node, depth=0):
+        # Ошибка 1: условие остановки (все метки одинаковые)
+        if np.all(sub_y == sub_y[0]):
             node["type"] = "terminal"
             node["class"] = sub_y[0]
             return
 
+        if self._max_depth is not None and depth >= self._max_depth:
+            node["type"] = "terminal"
+            node["class"] = Counter(sub_y).most_common(1)[0][0]
+            return
+
+        if self._min_samples_split is not None and len(sub_y) < self._min_samples_split:
+            node["type"] = "terminal"
+            node["class"] = Counter(sub_y).most_common(1)[0][0]
+            return
+
         feature_best, threshold_best, gini_best, split = None, None, None, None
-        for feature in range(1, sub_X.shape[1]):
+        # Ошибка 2: индексация признаков с 0
+        for feature in range(0, sub_X.shape[1]):
             feature_type = self._feature_types[feature]
             categories_map = {}
 
@@ -152,26 +134,44 @@ class DecisionTree:
                         current_click = clicks[key]
                     else:
                         current_click = 0
-                    ratio[key] = current_count / current_click
-                sorted_categories = list(map(lambda x: x[1], sorted(ratio.items(), key=lambda x: x[1])))
+                    # Ошибка 3: правильный расчет доли (Target Encoding)
+                    ratio[key] = current_click / current_count
+                # Ошибка 4: берем ключ категории (x[0]), а не значение ratio (x[1])
+                sorted_categories = list(map(lambda x: x[0], sorted(ratio.items(), key=lambda x: x[1])))
                 categories_map = dict(zip(sorted_categories, list(range(len(sorted_categories)))))
-
-                feature_vector = np.array(map(lambda x: categories_map[x], sub_X[:, feature]))
+                # Ошибка 5: map в list для корректной работы np.array в Python 3
+                feature_vector = np.array(list(map(lambda x: categories_map[x], sub_X[:, feature])))
             else:
                 raise ValueError
-
-            if len(feature_vector) == 3:
-                continue
+            # Ошибка 6: удалена странная проверка len == 3
 
             _, _, threshold, gini = find_best_split(feature_vector, sub_y)
+
+            if gini is None:
+                continue
+
+            # Проверяем, лучше ли этот джини, чем найденный ранее
             if gini_best is None or gini > gini_best:
+
+                # Создаем временный сплит, чтобы проверить min_samples_leaf
+                current_split = feature_vector < threshold
+
+                if self._min_samples_leaf is not None:
+                    len_left = np.sum(current_split)
+                    len_right = np.sum(np.logical_not(current_split))
+
+                    if len_left < self._min_samples_leaf or len_right < self._min_samples_leaf:
+                        continue
+
+
                 feature_best = feature
                 gini_best = gini
-                split = feature_vector < threshold
+                split = current_split
 
                 if feature_type == "real":
                     threshold_best = threshold
-                elif feature_type == "Categorical":
+                # Ошибка 7: исправление регистра строки "categorical"
+                elif feature_type == "categorical":
                     threshold_best = list(map(lambda x: x[0],
                                               filter(lambda x: x[1] < threshold, categories_map.items())))
                 else:
@@ -179,28 +179,48 @@ class DecisionTree:
 
         if feature_best is None:
             node["type"] = "terminal"
-            node["class"] = Counter(sub_y).most_common(1)
+            # Ошибка 8: извлечение самого класса из Counter
+            node["class"] = Counter(sub_y).most_common(1)[0][0]
             return
 
         node["type"] = "nonterminal"
-
         node["feature_split"] = feature_best
+
         if self._feature_types[feature_best] == "real":
             node["threshold"] = threshold_best
         elif self._feature_types[feature_best] == "categorical":
             node["categories_split"] = threshold_best
         else:
             raise ValueError
+
         node["left_child"], node["right_child"] = {}, {}
-        self._fit_node(sub_X[split], sub_y[split], node["left_child"])
-        self._fit_node(sub_X[np.logical_not(split)], sub_y[split], node["right_child"])
+        self._fit_node(sub_X[split], sub_y[split], node["left_child"], depth + 1)
+        # Ошибка 9: правильный слайс таргета для правого ребенка
+        self._fit_node(sub_X[np.logical_not(split)], sub_y[np.logical_not(split)], node["right_child"], depth + 1)
 
     def _predict_node(self, x, node):
-        # ╰( ͡° ͜ʖ ͡° )つ──☆*:・ﾟ
-        pass
+        if node["type"] == "terminal":
+            return node["class"]
+
+        feature_index = node["feature_split"]
+        feature_type = self._feature_types[feature_index]
+        feature_value = x[feature_index]
+
+        if feature_type == "real":
+            if feature_value < node["threshold"]:
+                return self._predict_node(x, node["left_child"])
+            else:
+                return self._predict_node(x, node["right_child"])
+        elif feature_type == "categorical":
+            if feature_value in node["categories_split"]:
+                return self._predict_node(x, node["left_child"])
+            else:
+                return self._predict_node(x, node["right_child"])
+        else:
+            raise ValueError
 
     def fit(self, X, y):
-        self._fit_node(X, y, self._tree)
+        self._fit_node(X, y, self._tree, depth=0)
 
     def predict(self, X):
         predicted = []
